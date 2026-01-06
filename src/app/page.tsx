@@ -141,7 +141,7 @@ const INITIAL_TASKS: Task[] = [
     id: 'i4', title: 'Pitch 0. V2 배포 기반 마련',
     discoveryOwners: ['기근영'],
     deliveryOwners: ['전지원'],
-    category: 'IS팀'
+    category: 'Shape-up' // Corrected based on new rules
   },
   {
     id: 'i5', title: '제품팀 Observability 구축',
@@ -186,7 +186,13 @@ export default function Dashboard() {
   const handleRefresh = async () => {
     setIsRefreshing(true);
     try {
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      const response = await fetch('/api/notion/refresh', { method: 'POST' });
+      const data = await response.json();
+      if (data.success) {
+        setTasks(data.tasks);
+      }
+    } catch (error) {
+      console.error('Refresh failed', error);
     } finally {
       setIsRefreshing(false);
     }
@@ -197,8 +203,16 @@ export default function Dashboard() {
   };
 
   // Helper to filter tasks by ownership in either phase
+  // Logic Update: Only show tasks if there are owners (meaning phase is completed/active as per logic)
   const getPhaseTasks = (category: string, phase: 'discovery' | 'delivery') => {
     let filtered = tasks.filter(t => t.category === category);
+
+    // Filter out items where the phase hasn't started/completed (owners list is empty)
+    if (phase === 'discovery') {
+      filtered = filtered.filter(t => t.discoveryOwners.length > 0);
+    } else {
+      filtered = filtered.filter(t => t.deliveryOwners.length > 0);
+    }
 
     if (selectedMember) {
       if (phase === 'discovery') {
@@ -219,18 +233,20 @@ export default function Dashboard() {
           <header className="flex justify-between items-end mb-8">
             <div>
               <h1 className="text-5xl font-extrabold tracking-tight mb-4 bg-clip-text text-transparent bg-gradient-to-r from-slate-900 to-slate-500">
-                Discovered & Delivered
+                Product Observability
               </h1>
               <p className="text-slate-500 text-lg leading-relaxed">
-                노션 SOT 기반 프로젝트 현황 대시보드입니다.<br />
+                문제 정의부터 해결까지, 우리가 집중하고 있는 문제를 투명하게 공유합니다.<br />
                 {selectedMember ? (
-                  <span className="text-accent font-semibold italic">✨ {selectedMember}님의 기여 내역을 필터링 중입니다.</span>
+                  <span className="text-accent font-semibold italic">✨ {selectedMember}님이 참여한 Problem Discovery & Delivery 내역입니다.</span>
                 ) : (
-                  "Shape-up, 실험, IS팀 로드맵의 Discovery & Delivery 현황을 공유합니다."
+                  "각 문제(Problem)가 누구에 의해 정의되고(Discovery), 어떻게 해결되고 있는지(Delivery) 확인하세요."
                 )}
               </p>
             </div>
-            <RefreshButton onRefresh={handleRefresh} isRefreshing={isRefreshing} />
+            <div className="flex items-center gap-2">
+              <RefreshButton onRefresh={handleRefresh} isRefreshing={isRefreshing} />
+            </div>
           </header>
 
           {/* Global Member Filter Area */}
@@ -250,67 +266,69 @@ export default function Dashboard() {
               ))}
             </div>
           </div>
-        </div>
-      </div>
+        </div >
+      </div >
 
       {/* Grid of Initiative Types */}
-      <div className="max-w-7xl mx-auto px-8 grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {SECTIONS.map((section) => {
-          const discoveryList = getPhaseTasks(section.name, 'discovery');
-          const deliveryList = getPhaseTasks(section.name, 'delivery');
+      < div className="max-w-7xl mx-auto px-8 grid grid-cols-1 lg:grid-cols-2 gap-8" >
+        {
+          SECTIONS.map((section) => {
+            const discoveryList = getPhaseTasks(section.name, 'discovery');
+            const deliveryList = getPhaseTasks(section.name, 'delivery');
 
-          return (
-            <section
-              key={section.name}
-              className={`
+            return (
+              <section
+                key={section.name}
+                className={`
                 glass p-8 relative overflow-hidden group transition-all duration-500 border-t-4
                 ${section.name === 'Shape-up' ? 'border-t-amber-400' : ''}
                 ${section.name === '실험' ? 'border-t-indigo-400' : ''}
                 ${section.name === 'IS팀' ? 'border-t-emerald-400' : ''}
                 ${section.name === 'etc' ? 'border-t-pink-400' : ''}
               `}
-            >
-              {/* Section Header */}
-              <div className="mb-8">
-                <h2 className="text-2xl font-bold mb-1 tracking-tight">{section.name}</h2>
-                <p className="text-slate-400 text-sm italic">{section.description}</p>
-              </div>
-
-              {/* Content Discovery/Delivery */}
-              <div className="grid grid-cols-2 gap-6">
-                {/* Discovery Area */}
-                <div>
-                  <h3 className="text-[10px] font-bold tracking-[0.2em] text-slate-400 mb-3 uppercase flex items-center gap-1.5">
-                    <span className="w-1 h-1 rounded-full bg-slate-300"></span>
-                    Discovery
-                  </h3>
-                  <div className="space-y-3">
-                    {isRefreshing ? <CardSkeleton /> : discoveryList.map(task => (
-                      <TaskCard key={task.id} title={task.title} owners={task.discoveryOwners} />
-                    ))}
-                    {!isRefreshing && discoveryList.length === 0 && <EmptyPlaceholder />}
-                  </div>
+              >
+                {/* Section Header */}
+                <div className="mb-8">
+                  <h2 className="text-2xl font-bold mb-1 tracking-tight">{section.name}</h2>
+                  <p className="text-slate-400 text-sm italic">{section.description}</p>
                 </div>
 
-                {/* Delivery Area */}
-                <div>
-                  <h3 className="text-[10px] font-bold tracking-[0.2em] text-slate-400 mb-3 uppercase flex items-center gap-1.5">
-                    <span className="w-1 h-1 rounded-full bg-slate-300"></span>
-                    Delivery
-                  </h3>
-                  <div className="space-y-3">
-                    {isRefreshing ? <CardSkeleton /> : deliveryList.map(task => (
-                      <TaskCard key={task.id} title={task.title} owners={task.deliveryOwners} />
-                    ))}
-                    {!isRefreshing && deliveryList.length === 0 && <EmptyPlaceholder />}
+                {/* Content Discovery/Delivery */}
+                <div className="grid grid-cols-2 gap-6">
+                  {/* Discovery Area */}
+                  <div>
+                    <h3 className="text-[10px] font-bold tracking-[0.2em] text-slate-400 mb-3 uppercase flex items-center gap-1.5">
+                      <span className="w-1 h-1 rounded-full bg-slate-300"></span>
+                      Discovery Actions
+                    </h3>
+                    <div className="space-y-3">
+                      {isRefreshing ? <CardSkeleton /> : discoveryList.map(task => (
+                        <TaskCard key={task.id} title={task.title} owners={task.discoveryOwners} />
+                      ))}
+                      {!isRefreshing && discoveryList.length === 0 && <EmptyPlaceholder phase="discovery" />}
+                    </div>
+                  </div>
+
+                  {/* Delivery Area */}
+                  <div>
+                    <h3 className="text-[10px] font-bold tracking-[0.2em] text-slate-400 mb-3 uppercase flex items-center gap-1.5">
+                      <span className="w-1 h-1 rounded-full bg-slate-300"></span>
+                      Delivery Actions
+                    </h3>
+                    <div className="space-y-3">
+                      {isRefreshing ? <CardSkeleton /> : deliveryList.map(task => (
+                        <TaskCard key={task.id} title={task.title} owners={task.deliveryOwners} />
+                      ))}
+                      {!isRefreshing && deliveryList.length === 0 && <EmptyPlaceholder phase="delivery" />}
+                    </div>
                   </div>
                 </div>
-              </div>
-            </section>
-          );
-        })}
-      </div>
-    </main>
+              </section>
+            );
+          })
+        }
+      </div >
+    </main >
   );
 }
 
@@ -327,10 +345,12 @@ function TaskCard({ title, owners }: { title: string; owners: string[] }) {
   );
 }
 
-function EmptyPlaceholder() {
+function EmptyPlaceholder({ phase }: { phase?: string }) {
   return (
     <div className="py-8 border-2 border-dashed border-slate-100 bg-slate-50/20 rounded-xl flex items-center justify-center">
-      <p className="text-[9px] text-slate-300 font-bold uppercase tracking-wider">No Items</p>
+      <p className="text-[9px] text-slate-300 font-bold uppercase tracking-wider">
+        {phase === 'discovery' ? 'No Discovery Actions' : (phase === 'delivery' ? 'No Delivery Actions' : 'No Items')}
+      </p>
     </div>
   );
 }
