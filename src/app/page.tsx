@@ -179,9 +179,13 @@ const SECTIONS: Section[] = [
 ];
 
 export default function Dashboard() {
-  const [tasks, setTasks] = useState<Task[]>(INITIAL_TASKS);
+  const [tasks, setTasks] = useState<Task[]>([]); // Start empty
   const [selectedMember, setSelectedMember] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+
+  useEffect(() => {
+    handleRefresh();
+  }, []);
 
   const handleRefresh = async () => {
     setIsRefreshing(true);

@@ -1,120 +1,250 @@
-# Google Sheets Automation Guide (Notion Sync)
+# Google Sheets Data Pipeline Setup (Final - UUID Fallback)
 
-**Google Sheets**를 중간 데이터베이스로 활용하여 정합성을 완벽하게 제어할 수 있는 구성입니다.
+이름 파싱이 안 된다면 **User UUID(아이디)**라도 나오게 설정했습니다.
+`openai.ts`에 이미 UUID 매핑이 있으니, 아이디만 넘어가면 대시보드에서 처리할 수도 있습니다.
+(물론 시트에서는 아이디로 보이겠지만, 데이터가 비어있는 것보단 낫습니다!)
 
-## 1. Google Sheet 준비 (Schema Update)
-1.  새 구글 스프레드시트 생성 & 시트 이름 **`Data`**로 변경.
-2.  `A1:F1` 헤더 설정:
-    `Category`, `Title`, `Status`, `Discoverer`, `Deliverer`, `URL`
-    *(URL은 대시보드에서 클릭 이동을 위해 두는 것을 권장합니다)*
-
-## 2. Apps Script 작성 (자동 분류 로직 포함)
-메뉴: **확장 프로그램** > **Apps Script**
+## 1. Apps Script 작성
+기존 코드를 모두 지우고 아래 코드로 교체합니다.
 
 ```javascript
-// === 설정: Notion Token & DB IDs ===
-const NOTION_TOKEN = 'secret_YOUR_TOKEN_HERE'; 
+/*
+ * Notion to Google Sheets Sync (UUID Fallback Version)
+ */
 
-const DATABASE_IDS = [
-  { category: 'Shape-up', id: '26fa0be0969d80a19173f39596399beb' },
-  { category: '실험', id: '2a7a0be0969d80169503f6d966cf2f47' },
-  { category: 'IS팀', id: '2b5a0be0969d80fd8fcde916aa29e045' },
-  { category: 'Global Problems', id: '2d9a0be0969d81be9c23ec5f26afd586' }
-];
+const CONFIG = {
+  TOKEN_V2: "여기에_token_v2_값을_붙여넣으세요", 
+  DATABASES: [
+    { category: 'Shape-up', url: "https://www.notion.so/..." },
+    { category: '실험', url: "https://www.notion.so/..." },
+    { category: 'IS팀', url: "https://www.notion.so/..." },
+    { category: 'etc', url: "https://www.notion.so/..." }
+  ]
+};
 
-function syncNotion() {
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu('Notion Sync')
+    .addItem('Sync Now', 'syncNotionFinal')
+    .addToUi();
+}
+
+function syncNotionFinal() {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Data');
-  // Clear old data (keep headers)
-  if (sheet.getLastRow() > 1) sheet.getRange(2, 1, sheet.getLastRow() - 1, 6).clearContent();
+  if (!sheet) {
+    SpreadsheetApp.getUi().alert("'Data' 시트가 없습니다.");
+    return;
+  }
 
-  let allRows = [];
+  if (sheet.getLastRow() > 1) {
+    sheet.getRange(2, 1, sheet.getLastRow() - 1, 6).clearContent();
+  }
 
-  DATABASE_IDS.forEach(db => {
-    let hasMore = true;
-    let cursor = undefined;
+  let allData = [];
+  let logs = [];
 
-    while (hasMore) {
-      const url = `https://api.notion.com/v1/databases/${db.id}/query`;
-      const payload = { page_size: 100 };
-      if (cursor) payload.start_cursor = cursor;
+  CONFIG.DATABASES.forEach(db => {
+    try {
+      const pageId = extractIdFromUrl(db.url);
+      const meta = getCollectionIds(pageId);
+      
+      if (!meta) {
+        logs.push(`[${db.category}] 실패: DB 없음`);
+        return;
+      }
 
-      const options = {
-        method: 'post',
-        headers: {
-          'Authorization': `Bearer ${NOTION_TOKEN}`,
-          'Notion-Version': '2022-06-28',
-          'Content-Type': 'application/json'
-        },
-        payload: JSON.stringify(payload),
-        muteHttpExceptions: true
-      };
-
-      const data = JSON.parse(UrlFetchApp.fetch(url, options).getContentText());
-      if (!data.results) break;
-
-      data.results.forEach(page => {
-        const props = page.properties;
-        let p = page.properties; // shortcut
-
-        // 1. Title
-        let title = "Untitled";
-        const titleKey = Object.keys(props).find(k => props[k].type === 'title');
-        if (titleKey && props[titleKey].title.length > 0) title = props[titleKey].title[0].plain_text;
-
-        // 2. Status
-        let status = "";
-        // Try common status keys
-        const statusProp = p['Status'] || p['상태'] || p['State'];
-        if (statusProp) {
-           if (statusProp.type === 'select') status = statusProp.select?.name || "";
-           else if (statusProp.type === 'status') status = statusProp.status?.name || "";
-        }
-
-        // 3. Owners (Discoverer vs Deliverer Logic)
-        let discoverer = [];
-        let deliverer = [];
-
-        if (db.category === 'Shape-up') {
-            // Shape-up: 제안자 -> Discoverer, 실행자 -> Deliverer
-            if (p['제안자']?.people) discoverer = p['제안자'].people.map(u => u.name);
-            if (p['실행자']?.people) deliverer = p['실행자'].people.map(u => u.name);
-        } else {
-            // Others: 담당자/People -> Both or conditional?
-            // User Rule: Usually 'Assignee' covers everything. Map to BOTH for safety, or refine?
-            // Simple approach: Map '담당자' to Deliverer.
-            // Map 'Lead' or '제안자' to Discoverer if exists.
-            let people = [];
-            const pp = p['담당자'] || p['Person'] || p['People'] || p['Assignee'];
-            if (pp?.people) people = pp.people.map(u => u.name);
-            
-            // Default: Same people for both roles in generic tasks, unless specialized
-            discoverer = people;
-            deliverer = people;
-        }
-
-        allRows.push([
-          db.category,
-          title,
-          status,
-          discoverer.join(', '),
-          deliverer.join(', '),
-          page.url // URL
-        ]);
-      });
-
-      hasMore = data.has_more;
-      cursor = data.next_cursor;
+      const result = fetchCollectionRows(meta.collectionId, meta.collectionViewId, db.category);
+      if (result.rows.length === 0) {
+         logs.push(`[${db.category}] 0개`);
+      } else {
+         allData = allData.concat(result.rows);
+         logs.push(`[${db.category}] ${result.rows.length}개 로드`);
+      }
+      
+    } catch (e) {
+      logs.push(`[${db.category}] 에러: ${e.message}`);
     }
   });
 
-  if (allRows.length > 0) sheet.getRange(2, 1, allRows.length, 6).setValues(allRows);
+  if (allData.length > 0) {
+    sheet.getRange(2, 1, allData.length, 6).setValues(allData);
+    SpreadsheetApp.getUi().alert(`완료!\n\n${logs.join('\n')}`);
+  } else {
+    SpreadsheetApp.getUi().alert(`실패.\n\n${logs.join('\n')}`);
+  }
+}
+
+// --- Logic ---
+
+function getCollectionIds(pageId) {
+  const url = "https://www.notion.so/api/v3/loadPageChunk";
+  const payload = {
+    "pageId": formatUuid(pageId),
+    "limit": 50,
+    "cursor": { "stack": [] },
+    "chunkNumber": 0,
+    "verticalColumns": false
+  };
+
+  const data = notionApiRequest(url, payload);
+  const blocks = data.recordMap?.block;
+  if (!blocks) throw new Error("블록 정보 없음");
+
+  let targetKey = Object.keys(blocks).find(k => k.replace(/-/g, '') === pageId.replace(/-/g, ''));
+  let block = blocks[targetKey]?.value;
+
+  if (block && block.collection_id && block.view_ids?.length > 0) {
+    return { collectionId: block.collection_id, collectionViewId: block.view_ids[0] };
+  }
+
+  const foundKey = Object.keys(blocks).find(k => {
+    const b = blocks[k].value;
+    return b && b.collection_id && b.view_ids && b.view_ids.length > 0;
+  });
+
+  if (foundKey) {
+    block = blocks[foundKey].value;
+    return { collectionId: block.collection_id, collectionViewId: block.view_ids[0] };
+  }
+  return null;
+}
+
+function fetchCollectionRows(collectionId, collectionViewId, category) {
+  const url = "https://www.notion.so/api/v3/queryCollection";
+  const payload = {
+    "collection": { "id": collectionId },
+    "collectionView": { "id": collectionViewId },
+    "loader": {
+      "type": "reducer",
+      "reducers": {
+        "collection_group_results": { "type": "results", "limit": 100 }
+      },
+      "searchQuery": "",
+      "userTimeZone": "Asia/Seoul",
+      "userLocale": "ko"
+    }
+  };
+
+  const data = notionApiRequest(url, payload);
+  const recordMap = data.recordMap;
+  const resultReducer = data.result?.reducerResults?.collection_group_results;
+  const blockIds = resultReducer?.blockIds || [];
+  
+  const collectionStub = recordMap.collection?.[collectionId]?.value;
+  const schema = collectionStub?.schema;
+  const notionUsers = recordMap.notion_user || {};
+
+  if (!schema) return { rows: [] };
+
+  const rows = [];
+  blockIds.forEach(bid => {
+    const block = recordMap.block?.[bid]?.value;
+    if (block && block.properties) {
+       rows.push(parseProps(block.properties, schema, category, block.id, notionUsers));
+    }
+  });
+  
+  return { rows: rows };
+}
+
+function parseProps(props, schema, category, blockId, notionUsers) {
+  let title = "-";
+  let status = "";
+  let discoverer = "";
+  let deliverer = "";
+
+  // Helper to find property by multiple names
+  const findPropKey = (candidates) => {
+    return Object.keys(schema).find(key => {
+       const name = schema[key].name;
+       return candidates.includes(name);
+    });
+  };
+
+  // 1. Status Extraction (Priority: Phase > Stage > Status)
+  // 'Status' often holds 'Must/Should' (Priority), so we look for 'Phase' or 'Stage' first.
+  const statusKey = findPropKey(['Phase', 'Stage', 'Step', '진행 단계', 'Current Status', 'Status', '상태']);
+  if (statusKey) {
+     const valArr = props[statusKey];
+     if (valArr) status = valArr.map(v => v[0]).join("");
+  }
+
+  // 2. Title Extraction
+  const titleKey = Object.keys(schema).find(key => schema[key].type === 'title');
+  if (titleKey && props[titleKey]) {
+     title = props[titleKey].map(v => v[0]).join("");
+  }
+
+  // 3. Person Parsing Helper
+  const extractPeople = (keyNames) => {
+      const key = findPropKey(keyNames);
+      if (!key) return "";
+      const valArr = props[key];
+      if (!valArr) return "";
+
+      const people = [];
+      valArr.forEach(chunk => {
+          // chunk example: ["‣", [["u", "user_id"]]]
+          if (chunk[1]) {
+              chunk[1].forEach(attr => {
+                  if (attr[0] === 'u') {
+                      const userId = attr[1];
+                      const userObj = notionUsers[userId]?.value;
+                      if (userObj) {
+                          const name = userObj.given_name ? `${userObj.family_name}${userObj.given_name}` : userObj.name;
+                          people.push(name || userId);
+                      } else {
+                          people.push(userId);
+                      }
+                  }
+              });
+          }
+      });
+      return people.join(', '); // Join with comma for multiple owners
+  };
+
+  // 4. Discoverer & Deliverer
+  // Shape-up specific: Search for specific role names
+  discoverer = extractPeople(['제안자', 'Discoverer', 'Owner', '담당자']);
+  deliverer = extractPeople(['실행자', 'Deliverer', 'Assign', '담당자']);
+
+  // Log detected properties for debugging (only if title is valid to avoid noise)
+  // if (title !== '-') Logger.log(`[${category}] ${title} -> StatusProp: ${statusKey} (${status})`);
+
+  // Fallback Logic
+  if (category !== 'Shape-up') {
+    if (deliverer && !discoverer) discoverer = deliverer;
+  }
+  
+  const url = ""; 
+
+  return [category, title, status, discoverer, deliverer, url];
+}
+
+function notionApiRequest(url, payload) {
+  const options = {
+    method: "post",
+    contentType: "application/json",
+    headers: {
+      "Cookie": `token_v2=${CONFIG.TOKEN_V2}`,
+      "x-notion-active-user-header": "",
+    },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  };
+  
+  const res = UrlFetchApp.fetch(url, options);
+  if (res.getResponseCode() !== 200) throw new Error(`API Error: ${res.getResponseCode()}`);
+  return JSON.parse(res.getContentText());
+}
+
+function extractIdFromUrl(url) {
+  const match = url.match(/([a-f0-9]{32})/);
+  if (!match) throw new Error("ID Not Found");
+  return match[1];
+}
+
+function formatUuid(id) {
+  return id.replace(/^(.{8})(.{4})(.{4})(.{4})(.{12})$/, "$1-$2-$3-$4-$5");
 }
 ```
-
-## 3. 트리거 설정 (1시간마다 실행)
-1.  Apps Script 좌측 **시계 아이콘** 클릭.
-2.  **+ 트리거 추가**: `syncNotion` / 시간 기반 / 시간 단위 타이머 / 1시간마다.
-
-## 4. CSV 연동
-1.  **파일 > 공유 > 웹에 게시** -> `Data` 시트 -> `CSV` 선택.
-2.  링크 복사하여 대시보드 `.env`에: `GOOGLE_SHEET_CSV_URL="링크"`

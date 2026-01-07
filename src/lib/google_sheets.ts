@@ -46,36 +46,31 @@ function parseCSV(text: string): SheetRow[] {
         return values;
     };
 
-    // Headers: Category, Title, Status, Discoverer, Deliverer, URL
-    // We assume specific order OR we map by Header name. Mapping is safer.
-    const headerLine = rows[0];
-    const headers = parseLine(headerLine).map(h => h.toLowerCase());
-
-    const idxMap = {
-        category: headers.indexOf('category'),
-        title: headers.indexOf('title'),
-        status: headers.indexOf('status'),
-        discoverer: headers.indexOf('discoverer'),
-        deliverer: headers.indexOf('deliverer'),
-        url: headers.indexOf('url'),
-    };
+    // We use fixed indices because the Apps Script writes in a specific order:
+    // [Category, Title, Status, Discoverer, Deliverer, URL]
+    // 0: Category
+    // 1: Title
+    // 2: Status
+    // 3: Discoverer
+    // 4: Deliverer
+    // 5: URL
 
     const results: SheetRow[] = [];
 
+    // Start from row 1 (skipping header row 0)
     for (let i = 1; i < rows.length; i++) {
         const cols = parseLine(rows[i]);
-        if (cols.length < 3) continue; // Skip malformed rows
 
-        // Helper to get safe value
-        const getVal = (idx: number) => (idx >= 0 && idx < cols.length) ? cols[idx] : "";
+        // Ensure we have enough columns, pad if necessary
+        const getVal = (idx: number) => (cols[idx] || "").trim();
 
         results.push({
-            Category: getVal(idxMap.category),
-            Title: getVal(idxMap.title),
-            Status: getVal(idxMap.status),
-            Discoverer: getVal(idxMap.discoverer),
-            Deliverer: getVal(idxMap.deliverer),
-            URL: getVal(idxMap.url),
+            Category: getVal(0),
+            Title: getVal(1),
+            Status: getVal(2),
+            Discoverer: getVal(3),
+            Deliverer: getVal(4),
+            URL: getVal(5),
             Raw: cols
         });
     }
