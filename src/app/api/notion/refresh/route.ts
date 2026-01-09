@@ -90,7 +90,7 @@ export async function POST() {
             const isDiscovery = DISCOVERY_VALID.some(s => status.includes(s) || s === status);
 
             // 2. Delivery Validation
-            const DELIVERY_VALID = ['Delivered', '완료'];
+            const DELIVERY_VALID = ['Delivered', '완료', 'Delivering'];
             let isDelivery = (source === '실험' && status === 'Archive') || DELIVERY_VALID.some(s => status.includes(s) || s === status);
 
             // 3. Owner Parsing

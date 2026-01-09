@@ -182,6 +182,7 @@ export default function Dashboard() {
   const [tasks, setTasks] = useState<Task[]>([]); // Start empty
   const [selectedMember, setSelectedMember] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [activeTab, setActiveTab] = useState<'ongoing' | 'done'>('ongoing');
 
   useEffect(() => {
     handleRefresh();
@@ -207,9 +208,17 @@ export default function Dashboard() {
   };
 
   // Helper to filter tasks by ownership in either phase
-  // Logic Update: Only show tasks if there are owners (meaning phase is completed/active as per logic)
+  // Logic Update: Filter by Active Tab (Ongoing vs Done)
   const getPhaseTasks = (category: string, phase: 'discovery' | 'delivery') => {
     let filtered = tasks.filter(t => t.category === category);
+
+    // Tab Filtering Logic
+    const DONE_STATUSES = ['Delivered', '완료', 'Archive'];
+    if (activeTab === 'done') {
+      filtered = filtered.filter(t => t.status && DONE_STATUSES.some(s => t.status?.includes(s)));
+    } else {
+      filtered = filtered.filter(t => t.status && !DONE_STATUSES.some(s => t.status?.includes(s)));
+    }
 
     // Filter out items where the phase hasn't started/completed (owners list is empty)
     if (phase === 'discovery') {
@@ -232,43 +241,56 @@ export default function Dashboard() {
   return (
     <main className="min-h-screen bg-[#F8FAFC] text-slate-900 font-[family-name:var(--font-geist-sans)] pb-20">
       {/* Top Banner / Hero Area */}
-      <div className="bg-white border-b border-slate-200 pt-12 pb-8 px-8 mb-12">
+      <div className="bg-white border-b border-slate-200 pt-16 pb-0 px-8 mb-12">
         <div className="max-w-7xl mx-auto">
-          <header className="flex justify-between items-end mb-8">
-            <div>
-              <h1 className="text-5xl font-extrabold tracking-tight mb-4 bg-clip-text text-transparent bg-gradient-to-r from-slate-900 to-slate-500">
+          <header className="flex flex-col md:flex-row justify-between items-start md:items-end mb-12 gap-6">
+            <div className="flex-1">
+              <h1 className="text-6xl font-black tracking-tighter mb-4 bg-clip-text text-transparent bg-gradient-to-br from-slate-900 via-slate-700 to-slate-400 leading-none">
                 Product Observability
               </h1>
-              <p className="text-slate-500 text-lg leading-relaxed">
-                문제 정의부터 해결까지, 우리가 집중하고 있는 문제를 투명하게 공유합니다.<br />
-                {selectedMember ? (
-                  <span className="text-accent font-semibold italic">✨ {selectedMember}님이 참여한 Problem Discovery & Delivery 내역입니다.</span>
-                ) : (
-                  "각 문제(Problem)가 누구에 의해 정의되고(Discovery), 어떻게 해결되고 있는지(Delivery) 확인하세요."
-                )}
+              <p className="text-slate-500 text-xl font-medium max-w-2xl leading-relaxed">
+                {activeTab === 'ongoing' ? "현재 팀이 해결하고 있는 활성 문제들입니다." : "최근 해결되었거나 보관된 문제들의 히스토리입니다."}
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-4 bg-slate-50 p-1.5 rounded-2xl border border-slate-100 shadow-sm">
+              <button
+                onClick={() => setActiveTab('ongoing')}
+                className={`px-8 py-3 rounded-xl text-sm font-bold transition-all duration-300 ${activeTab === 'ongoing' ? 'bg-white text-slate-900 shadow-md ring-1 ring-slate-100' : 'text-slate-400 hover:text-slate-600'}`}
+              >
+                🏃 Ongoing
+              </button>
+              <button
+                onClick={() => setActiveTab('done')}
+                className={`px-8 py-3 rounded-xl text-sm font-bold transition-all duration-300 ${activeTab === 'done' ? 'bg-white text-slate-900 shadow-md ring-1 ring-slate-100' : 'text-slate-400 hover:text-slate-600'}`}
+              >
+                ✅ Done
+              </button>
+              <div className="w-px h-8 bg-slate-200 mx-2" />
               <RefreshButton onRefresh={handleRefresh} isRefreshing={isRefreshing} />
             </div>
           </header>
 
-          {/* Global Member Filter Area */}
-          <div className="bg-slate-50/50 rounded-2xl p-6 border border-slate-100 scale-in-center">
-            <h3 className="text-[10px] font-bold tracking-[0.2em] text-slate-400 mb-4 uppercase">Team Members Filter</h3>
-            <div className="flex flex-wrap gap-2">
-              {ALL_MEMBERS.map((member) => (
-                <MemberButton
-                  key={member.name}
-                  name={member.name}
-                  role={member.role}
-                  part={member.part}
-                  isHiring={member.isHiring}
-                  isSelected={selectedMember === member.name}
-                  onClick={() => toggleMember(member.name)}
-                />
-              ))}
-            </div>
+          {/* Collapsible Member Filter */}
+          <div className="mb-0 border-t border-slate-50">
+            <details className="group">
+              <summary className="py-4 text-[11px] font-black uppercase tracking-widest text-slate-400 cursor-pointer flex items-center gap-2 hover:text-slate-600 transition-colors">
+                <span className="transition-transform group-open:rotate-90">▶</span>
+                Filter by Member {selectedMember && <span className="text-indigo-500">({selectedMember})</span>}
+              </summary>
+              <div className="pb-8 flex flex-wrap gap-2 pt-2 animate-in fade-in slide-in-from-top-2 duration-300">
+                {ALL_MEMBERS.map((member) => (
+                  <MemberButton
+                    key={member.name}
+                    name={member.name}
+                    role={member.role}
+                    part={member.part}
+                    isHiring={member.isHiring}
+                    isSelected={selectedMember === member.name}
+                    onClick={() => toggleMember(member.name)}
+                  />
+                ))}
+              </div>
+            </details>
           </div>
         </div >
       </div >
